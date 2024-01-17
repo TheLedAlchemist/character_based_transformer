@@ -1,3 +1,11 @@
+#------------------------------------------------------------------------------
+#
+# This is a guided project completed by following along with Andrej Karpathy
+# Most code from "Let's build GPT: from scratch, in code, spelled out."
+# https://www.youtube.com/watch?v=kCc8FmEb1nY&list=WL&index=51&t=769s
+#
+#------------------------------------------------------------------------------
+
 import os
 import torch
 
@@ -75,7 +83,7 @@ for b in range(batch_size): # Iterating batches/going by tensor
     for t in range(block_size): # Iterating time/taking elements by tensor
         context = xb[b, :t+1]
         target = yb[b,t]
-        print(f"When input is {context.tolist()}, target is {target}")
+        # print(f"When input is {context.tolist()}, target is {target}")
 
 
 # xb is the input to the transformer
@@ -103,3 +111,6 @@ class BigramLanguageModel(nn.Module):
 m = BigramLanguageModel(vocab_size)
 out = m(xb, yb)
 print(out.shape)
+
+# 22:56
+
