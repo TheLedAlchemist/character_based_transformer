@@ -19,7 +19,7 @@ with open('tinyshksp.txt', 'r') as f:
 
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
-#print(''.join(chars))
+# print(''.join(chars))
 # print(vocab_size)
 
 # Map characters to integers
@@ -70,14 +70,9 @@ def get_batch(split):
     return x, y
 
 xb, yb = get_batch('train')
-print('Inputs: ')
-print(xb.shape)
-print(xb)
-print('Targets: ')
-print(yb.shape)
-print(yb)
 
-print("-----------------------------------")
+# print(f'Inputs: {xb.shape} \n{xb} \n\n\nTargets: {yb.shape} \n{yb}')
+# print("-----------------------------------\n")
 
 for b in range(batch_size): # Iterating batches/going by tensor
     for t in range(block_size): # Iterating time/taking elements by tensor
@@ -87,7 +82,8 @@ for b in range(batch_size): # Iterating batches/going by tensor
 
 
 # xb is the input to the transformer
-print(xb)
+# print(xb)
+
 
 # Implementing the bigram language model...
 
@@ -102,15 +98,65 @@ class BigramLanguageModel(nn.Module):
         # Token reads logits for the next token using a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
 
-    def forward(self, idx, targets):
+    def forward(self, idx, targets=None):
         # idx and targets are (B,T) tensors of integers
         logits = self.token_embedding_table(idx) # (B, T, C)
+        
+        if targets is None:
+            loss = None
 
-        return logits
+        else:
+            # cross_entropy expects (B,C,T) instead of (B,T,C)
+            B, T, C = logits.shape
+            logits = logits.view(B*T, C)
+            targets = targets.view(B*T)
+            loss = f.cross_entropy(logits,targets)
+
+        return logits, loss
+    
+    def generate(self, idx, max_new_tokens):
+        
+        # idx is (B, T) array of indices in current context
+        for _ in range(max_new_tokens):
+            logits, loss = self(idx)
+            logits = logits[:, -1, :]
+            
+            # Using softmax to obtian probabilities
+            probs = f.softmax(logits, dim=-1) 
+            idx_next = torch.multinomial(probs, num_samples=1)
+            
+            # Append index to current sequence
+            idx = torch.cat((idx, idx_next), dim=1)
+        
+        return idx
     
 m = BigramLanguageModel(vocab_size)
-out = m(xb, yb)
-print(out.shape)
+logits, loss = m(xb, yb)
+# print(logits.shape)
+print(f'Loss: {loss}')
 
-# 22:56
+# Generating using defined idx, moving from pytorch object to 1-Dimensional python list
+#print(decode(m.generate(idx = torch.zeros((1, 1), dtype=torch.long), max_new_tokens=100)[0].tolist()))
+
+
+# Creating an AdamW optimizer
+optimizer = torch.optim.AdamW(m.parameters(), lr=1e-3)
+
+batch_size = 32
+
+# Defining a training loop
+for steps in range(10000):
+    xb, yb = get_batch('train')
+
+    logits, loss = m(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+print(loss.item())
+print(decode(m.generate(idx = torch.zeros((1, 1), dtype=torch.long), max_new_tokens=100)[0].tolist()))
+
+
+
+# 33:40
 
