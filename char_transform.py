@@ -8,8 +8,22 @@
 
 import os
 import torch
+import torch.nn as nn
+from torch.nn import functional as F # imported as capital 'F' to avoid conflict with f.read()
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# Hyperparameters
+batch_size = 32 # How many sequences are processed in parallel
+block_size = 8 # Maximum length for the prediction
+max_iters = 3000
+eval_interval = 200
+learning_rate = 1e-2
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+eval_iters = 200
+
+torch.manual_seed(1337)
+
 with open('tinyshksp.txt', 'r') as f:
     text = f.read()
 
@@ -42,7 +56,7 @@ n = int(0.9*len(data))
 train_data = data[:n]
 val_data = data[n:]
 
-block_size = 8
+
 train_data[:block_size+1]
 
 x = train_data[:block_size]
@@ -53,12 +67,6 @@ for t in range(block_size):
     target = y[t]
     # print(f'When input is {context}, target {target}')
 
-# 18:47
-    
-torch.manual_seed(1337)
-batch_size = 4 # How many sequences are processed in parallel
-block_size = 8 # Maximum length for the prediction
-
 def get_batch(split):
     # Generate a set of inputs (x) and targets (y)
     data = train_data if split == 'train' else val_data
@@ -67,7 +75,24 @@ def get_batch(split):
     # Taking input and target tensors and stacking them, offsetting targets
     x = torch.stack([data[i:i+block_size] for i in ix])
     y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+    x, y = x.to(device), y.to(device)
+    
     return x, y
+
+# Averages loss over multiple batches
+@torch.no_grad() # Never calling backwards, more memory efficient
+def estimate_loss():
+    out = {}
+    model.eval()
+    for split in ['train','val']:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            logits, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
 
 xb, yb = get_batch('train')
 
@@ -86,11 +111,6 @@ for b in range(batch_size): # Iterating batches/going by tensor
 
 
 # Implementing the bigram language model...
-
-import torch.nn as nn
-from torch.nn import functional as f
-torch.manual_seed(1337)
-
 class BigramLanguageModel(nn.Module):
 
     def __init__(self, vocab_size):
@@ -110,7 +130,7 @@ class BigramLanguageModel(nn.Module):
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
-            loss = f.cross_entropy(logits,targets)
+            loss = F.cross_entropy(logits,targets)
 
         return logits, loss
     
@@ -122,7 +142,7 @@ class BigramLanguageModel(nn.Module):
             logits = logits[:, -1, :]
             
             # Using softmax to obtian probabilities
-            probs = f.softmax(logits, dim=-1) 
+            probs = F.softmax(logits, dim=-1) 
             idx_next = torch.multinomial(probs, num_samples=1)
             
             # Append index to current sequence
@@ -130,7 +150,9 @@ class BigramLanguageModel(nn.Module):
         
         return idx
     
-m = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel(vocab_size)
+m = model.to(device)
+
 logits, loss = m(xb, yb)
 # print(logits.shape)
 print(f'Loss: {loss}')
@@ -140,12 +162,16 @@ print(f'Loss: {loss}')
 
 
 # Creating an AdamW optimizer
-optimizer = torch.optim.AdamW(m.parameters(), lr=1e-3)
-
-batch_size = 32
+optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
 # Defining a training loop
-for steps in range(10000):
+for iter in range(max_iters):
+    
+    # Every eval_interval iterations, 
+    if iter % eval_interval == 0:
+        losses = estimate_loss()
+        print(f"Step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    
     xb, yb = get_batch('train')
 
     logits, loss = m(xb, yb)
@@ -153,10 +179,10 @@ for steps in range(10000):
     loss.backward()
     optimizer.step()
 
-print(loss.item())
-print(decode(m.generate(idx = torch.zeros((1, 1), dtype=torch.long), max_new_tokens=100)[0].tolist()))
+context = torch.zeros((1,1), dtype=torch.long, device=device)
+print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
 
 
 
-# 33:40
+# 41:48
 
