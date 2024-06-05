@@ -16,11 +16,13 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # Hyperparameters
 batch_size = 32 # How many sequences are processed in parallel
 block_size = 8 # Maximum length for the prediction
-max_iters = 3000
+max_iters = 400
 eval_interval = 200
 learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
+n_embd = 32
+
 
 torch.manual_seed(1337)
 
@@ -45,7 +47,7 @@ decode = lambda l: "".join([itos[i] for i in l]) # takes in list of ints, output
 # print(encode("Hola"))
 # print(decode(encode("boo")))
 
-data = torch.tensor(encode(text), dtype=torch.long)
+data = torch.tensor(encode(text), dtype=torch.long).to(device)
 # print(data.shape, data.dtype)
 # print(data[:1000])
 
@@ -113,18 +115,24 @@ for b in range(batch_size): # Iterating batches/going by tensor
 # Implementing the bigram language model...
 class BigramLanguageModel(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
         # Token reads logits for the next token using a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
+        B, T = idx.shape
+
         # idx and targets are (B,T) tensors of integers
-        logits = self.token_embedding_table(idx) # (B, T, C)
-        
+        tok_emb = self.token_embedding_table(idx) # (B, T, C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T, C)
+        x = tok_emb + pos_emb # (B, T, C)
+        logits = self.lm_head(x) # (B, T, vocab_size)
+
         if targets is None:
             loss = None
-
         else:
             # cross_entropy expects (B,C,T) instead of (B,T,C)
             B, T, C = logits.shape
@@ -134,23 +142,30 @@ class BigramLanguageModel(nn.Module):
 
         return logits, loss
     
-    def generate(self, idx, max_new_tokens):
-        
-        # idx is (B, T) array of indices in current context
+    def generate(self, idx, max_new_tokens):  # Fixed using GPT
+        # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
-            logits, loss = self(idx)
+            logits, _ = self(idx)
             logits = logits[:, -1, :]
-            
-            # Using softmax to obtian probabilities
-            probs = F.softmax(logits, dim=-1) 
-            idx_next = torch.multinomial(probs, num_samples=1)
-            
-            # Append index to current sequence
-            idx = torch.cat((idx, idx_next), dim=1)
-        
-        return idx
+
+            # Using softmax to obtain probabilities
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1).squeeze(1)
+
+            print(f"Dimension of idx: {idx.dim()}")
+            print(f"Dimension of idx_next: {idx_next.dim()}")
+
+            print(f"Shape of idx: {idx.shape}")
+            print(f"Shape of idx_next.unsqueeze(0): {idx_next.unsqueeze(0).shape}")
+
+
+            # Append index to the current sequence
+            idx = torch.cat((idx, idx_next.unsqueeze(0)), dim=0)
+
+        # Remove the initial context before returning
+        return idx[1:]
     
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(device)
 
 logits, loss = m(xb, yb)
@@ -179,8 +194,15 @@ for iter in range(max_iters):
     loss.backward()
     optimizer.step()
 
-context = torch.zeros((1,1), dtype=torch.long, device=device)
-print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+generated_sequence = m.generate(context, max_new_tokens=500)
+if generated_sequence.ndim == 2:  # Check for dimension mismatch
+    print(decode(generated_sequence[0].tolist()))
+else:
+    print("Error in sequence generation: Dimension mismatch.")
+
+# context = torch.zeros((1,1), dtype=torch.long, device=device)
+# print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
 
 
 
